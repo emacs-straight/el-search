@@ -7,7 +7,7 @@
 ;; Created: 29 Jul 2015
 ;; Keywords: lisp
 ;; Compatibility: GNU Emacs 25
-;; Version: 1.11.2
+;; Version: 1.11.3
 ;; Package-Requires: ((emacs "25") (stream "2.2.4") (cl-print "1.0"))
 
 
@@ -426,9 +426,6 @@
 ;; - Add org and/or Info documentation
 ;;
 ;; - Could we profit from the edebug-read-storing-offsets reader?
-;;
-;; - We need a mean to prepare occur output for posting.  Surround
-;;   matches with [[[ ]]] maybe?
 ;;
 ;; - Make currently hardcoded bindings in
 ;;   `el-search-loop-over-bindings' configurable
@@ -1043,15 +1040,17 @@ nil."
                                  ;; A very common mistake: input "foo" instead of "'foo"
                                  (display-message "    [%s]" msg)
                                  (sit-for 2))
-                               (let ((el-search--search-pattern-1-do-fun
-                                      (el-search--make-display-animation-function
-                                       (lambda (icon)
-                                         (display-message (concat "     " icon))))))
-                                 (when-let ((count
-                                             (try (with-current-buffer buf
-                                                    (cl-letf (((point) (window-point base-win)))
-                                                      (el-search-display-match-count 'dont-message))))))
-                                   (display-message "     %-12s" count)
+                               (let ((count
+                                      (try (with-current-buffer buf
+                                             (cl-letf (((point) (window-point base-win)))
+                                               (el-search-display-match-count
+                                                'dont-message
+                                                (el-search--make-display-animation-function
+                                                 (lambda (icon)
+                                                   (display-message (concat "     " icon))))))))))
+                                 (when (eq count t) (setq count nil))
+                                 (when-let ((show-this (or count err)))
+                                   (display-message "     %-12s" show-this)
                                    (sit-for el-search-mb-hints-timeout))))
                            (delete-overlay ol))))
               (unless (string= input "")
@@ -1203,7 +1202,9 @@ expander functions.")
          (ud (help-split-fundoc main name)))
     (with-temp-buffer
       (insert (or (cdr ud) main)
-              "\n\nThe following additional pattern types are currently defined:")
+              "\n\n\
+In addition to the standard `pcase' patterns the following
+pattern types are defined:")
       (mapc
        (pcase-lambda (`(,symbol . ,fun))
          (unless (string-match-p "\\`[-_]\\|--" (symbol-name symbol)) ;Let's consider these "internal"
@@ -2697,119 +2698,120 @@ The value is a list of elements
 MATCHES is a stream of matches in this buffer.  The other values
 are used to check validity.")
 
-(defun el-search-display-match-count (&optional just-count)
+(defun el-search-display-match-count (&optional just-count animator)
   "Display an x/y-style match count in the echo area.
 With optional argument JUST-COUNT non-nil, only return a string,
 don't display anything"
   (when (or just-count (and el-search--success (not el-search--wrap-flag)))
     (prog1
-        (while-no-input
-          (apply (if just-count #'format
-                   (lambda (&rest args)
-                     (setq el-search--last-message (apply #'el-search--message-no-log args))))
-                 (progn
+        (let ((el-search--search-pattern-1-do-fun animator))
+          (while-no-input
+            (apply (if just-count #'format
+                     (lambda (&rest args)
+                       (setq el-search--last-message (apply #'el-search--message-no-log args))))
+                   (progn
 
-                   ;; Check whether cached stream of buffer matches is still valid
-                   (pcase el-search--buffer-match-count-data
-                     ((or
-                       (and `(,(and (pred el-search-object-p)
-                                    (pred (eq el-search--current-search)))
-                              . ,_)
-                            (pred (eq el-search--this-session-match-count-data)))
-                       `(,(pred (eq el-search--current-search))
-                         ,(pred (eq (buffer-chars-modified-tick)))
-                         (,(pred (eq (point-min))) ,(pred (eq (point-max))))  . ,_)))
+                     ;; Check whether cached stream of buffer matches is still valid
+                     (pcase el-search--buffer-match-count-data
+                       ((or
+                         (and `(,(and (pred el-search-object-p)
+                                      (pred (eq el-search--current-search)))
+                                . ,_)
+                              (pred (eq el-search--this-session-match-count-data)))
+                         `(,(pred (eq el-search--current-search))
+                           ,(pred (eq (buffer-chars-modified-tick)))
+                           (,(pred (eq (point-min))) ,(pred (eq (point-max))))  . ,_)))
 
-                     (_
-                      ;; (message "Refreshing match count data") (sit-for 1)
-                      (redisplay) ;don't delay highlighting
-                      (setq-local el-search--buffer-match-count-data
-                                  (let ((stream-of-buffer-matches
-                                         (seq-map #'cadr
-                                                  (el-search--all-matches
-                                                   (el-search-make-search
-                                                    (el-search--current-pattern)
-                                                    (let ((current-buffer (current-buffer)))
-                                                      (lambda () (stream (list current-buffer)))))
-                                                   'dont-copy))))
-                                    (list
-                                     el-search--current-search
-                                     (buffer-chars-modified-tick)
-                                     `(,(point-min) ,(point-max))
-                                     stream-of-buffer-matches)))
-                      (setq el-search--this-session-match-count-data
-                            el-search--buffer-match-count-data)))
+                       (_
+                        ;; (message "Refreshing match count data") (sit-for 1)
+                        (redisplay) ;don't delay highlighting
+                        (setq-local el-search--buffer-match-count-data
+                                    (let ((stream-of-buffer-matches
+                                           (seq-map #'cadr
+                                                    (el-search--all-matches
+                                                     (el-search-make-search
+                                                      (el-search--current-pattern)
+                                                      (let ((current-buffer (current-buffer)))
+                                                        (lambda () (stream (list current-buffer)))))
+                                                     'dont-copy))))
+                                      (list
+                                       el-search--current-search
+                                       (buffer-chars-modified-tick)
+                                       `(,(point-min) ,(point-max))
+                                       stream-of-buffer-matches)))
+                        (setq el-search--this-session-match-count-data
+                              el-search--buffer-match-count-data)))
 
-                   (let ((pos-here (point)) (matches-<=-here 1) total-matches
-                         (defun-bounds (or (el-search--bounds-of-defun) (cons (point) (point))))
-                         (matches-<=-here-in-defun 1) (total-matches-in-defun 0)
-                         (largest-match-start-not-after-pos-here nil))
-                     (pcase-let ((`(,_ ,_ ,_ ,matches) el-search--buffer-match-count-data))
-                       (setq total-matches (let ((inhibit-message t)) (seq-length matches)))
-                       (while (and (not (stream-empty-p matches))
-                                   (< (stream-first matches) (cdr defun-bounds)))
-                         (when (<= (stream-first matches) pos-here)
-                           (setq largest-match-start-not-after-pos-here (stream-first matches))
-                           (unless (= (stream-first matches) pos-here)
-                             (cl-incf matches-<=-here)))
-                         (when (<= (car defun-bounds) (stream-first matches))
-                           (cl-incf total-matches-in-defun)
-                           (when (< (stream-first matches) pos-here)
-                             (cl-incf matches-<=-here-in-defun)))
-                         (stream-pop matches))
-                       (if (zerop total-matches)
-                           (list "(No matches)")
-                         (let* ((at-a-match-but-not-at-match-beginning
-                                 (and largest-match-start-not-after-pos-here
-                                      (and (< largest-match-start-not-after-pos-here pos-here)
-                                           (save-excursion
-                                             (goto-char largest-match-start-not-after-pos-here)
-                                             (<= pos-here (el-search--end-of-sexp))))))
-                                (at-a-match
-                                 (and largest-match-start-not-after-pos-here
-                                      (or (= pos-here largest-match-start-not-after-pos-here)
-                                          at-a-match-but-not-at-match-beginning))))
-                           (when (or at-a-match-but-not-at-match-beginning
-                                     (not at-a-match))
-                             (cl-decf matches-<=-here)
-                             (cl-decf matches-<=-here-in-defun))
-                           (if at-a-match
-                               (let ((buffer-or-file
-                                      (let ((head (el-search-object-head el-search--current-search)))
-                                        (or (el-search-head-file head)
-                                            (buffer-name (el-search-head-buffer head))))))
-                                 (if just-count
-                                     (list "%d/%d" matches-<=-here total-matches)
-                                   (list
-                                    "%s %d/%d  %s"
-                                    buffer-or-file
-                                    matches-<=-here
-                                    total-matches
-                                    (format
-                                     (pcase (save-excursion
-                                              (goto-char (car defun-bounds))
-                                              (and (el-search-looking-at '`(,_ ,_ . ,_))
-                                                   (looking-at "(") ;exclude toplevel `ATOM and sim.
-                                                   (let ((region (list
-                                                                  (progn (down-list) (point))
-                                                                  (min (line-end-position)
-                                                                       (scan-sexps (point) 2)))))
-                                                     (when (bound-and-true-p jit-lock-mode)
-                                                       (apply #'jit-lock-fontify-now region))
-                                                     (apply #'buffer-substring region))))
-                                       ((and (pred stringp) signature)
-                                        (format "(%s  %%d/%%d)"
-                                                (truncate-string-to-width
-                                                 signature
-                                                 40 nil nil 'ellipsis)))
-                                       (_ "(%d/%d)"))
-                                     matches-<=-here-in-defun total-matches-in-defun))))
-                             (list
-                              (concat (if (not just-count) "[Not at a match]   " "")
-                                      (if (= matches-<=-here total-matches)
-                                          (format "(%s/%s <-)" matches-<=-here total-matches)
-                                        (format "(-> %s/%s)" (1+ matches-<=-here) total-matches)))))))))
-                   )))
+                     (let ((pos-here (point)) (matches-<=-here 1) total-matches
+                           (defun-bounds (or (el-search--bounds-of-defun) (cons (point) (point))))
+                           (matches-<=-here-in-defun 1) (total-matches-in-defun 0)
+                           (largest-match-start-not-after-pos-here nil))
+                       (pcase-let ((`(,_ ,_ ,_ ,matches) el-search--buffer-match-count-data))
+                         (setq total-matches (let ((inhibit-message t)) (seq-length matches)))
+                         (while (and (not (stream-empty-p matches))
+                                     (< (stream-first matches) (cdr defun-bounds)))
+                           (when (<= (stream-first matches) pos-here)
+                             (setq largest-match-start-not-after-pos-here (stream-first matches))
+                             (unless (= (stream-first matches) pos-here)
+                               (cl-incf matches-<=-here)))
+                           (when (<= (car defun-bounds) (stream-first matches))
+                             (cl-incf total-matches-in-defun)
+                             (when (< (stream-first matches) pos-here)
+                               (cl-incf matches-<=-here-in-defun)))
+                           (stream-pop matches))
+                         (if (zerop total-matches)
+                             (list "(No matches)")
+                           (let* ((at-a-match-but-not-at-match-beginning
+                                   (and largest-match-start-not-after-pos-here
+                                        (and (< largest-match-start-not-after-pos-here pos-here)
+                                             (save-excursion
+                                               (goto-char largest-match-start-not-after-pos-here)
+                                               (<= pos-here (el-search--end-of-sexp))))))
+                                  (at-a-match
+                                   (and largest-match-start-not-after-pos-here
+                                        (or (= pos-here largest-match-start-not-after-pos-here)
+                                            at-a-match-but-not-at-match-beginning))))
+                             (when (or at-a-match-but-not-at-match-beginning
+                                       (not at-a-match))
+                               (cl-decf matches-<=-here)
+                               (cl-decf matches-<=-here-in-defun))
+                             (if at-a-match
+                                 (let ((buffer-or-file
+                                        (let ((head (el-search-object-head el-search--current-search)))
+                                          (or (el-search-head-file head)
+                                              (buffer-name (el-search-head-buffer head))))))
+                                   (if just-count
+                                       (list "%d/%d" matches-<=-here total-matches)
+                                     (list
+                                      "%s %d/%d  %s"
+                                      buffer-or-file
+                                      matches-<=-here
+                                      total-matches
+                                      (format
+                                       (pcase (save-excursion
+                                                (goto-char (car defun-bounds))
+                                                (and (el-search-looking-at '`(,_ ,_ . ,_))
+                                                     (looking-at "(") ;exclude toplevel `ATOM and sim.
+                                                     (let ((region (list
+                                                                    (progn (down-list) (point))
+                                                                    (min (line-end-position)
+                                                                         (scan-sexps (point) 2)))))
+                                                       (when (bound-and-true-p jit-lock-mode)
+                                                         (apply #'jit-lock-fontify-now region))
+                                                       (apply #'buffer-substring region))))
+                                         ((and (pred stringp) signature)
+                                          (format "(%s  %%d/%%d)"
+                                                  (truncate-string-to-width
+                                                   signature
+                                                   40 nil nil 'ellipsis)))
+                                         (_ "(%d/%d)"))
+                                       matches-<=-here-in-defun total-matches-in-defun))))
+                               (list
+                                (concat (if (not just-count) "[Not at a match]   " "")
+                                        (if (= matches-<=-here total-matches)
+                                            (format "(%s/%s <-)" matches-<=-here total-matches)
+                                          (format "(-> %s/%s)" (1+ matches-<=-here) total-matches)))))))))
+                     ))))
       (when quit-flag (el-search-keyboard-quit 'dont-quit)))))
 
 (defun el-search-hl-other-matches (matcher)
@@ -2864,24 +2866,22 @@ With argument STOP non-nil, force cleanup."
       ('el-search-query-replace)
       ((guard (el-search--entering-prefix-arg-p))) ; don't hide key input feedback
       ('el-search-pattern
-       (let ((el-search--search-pattern-1-do-fun
-              (if (eq this-command last-command)
-                  el-search-hl-post-command-fun--last-animator
-                (setq el-search-hl-post-command-fun--last-animator
-                      (el-search--make-display-animation-function
-                       (lambda (icon)
-                         (let ((inhibit-message nil))
-                           (setq el-search--last-message
-                                 (el-search--message-no-log
-                                  "%s   %s"
-                                  (let ((head (el-search-object-head el-search--current-search)))
-                                    (or (el-search-head-file head)
-                                        (el-search-head-buffer head)))
-                                  icon)))))))))
-         (condition-case-unless-debug err (el-search-display-match-count)
-           (error
-            (el-search--message-no-log
-             "Error counting matches: %s" (error-message-string err))))))
+       (unless (eq this-command last-command)
+         (setq el-search-hl-post-command-fun--last-animator
+               (el-search--make-display-animation-function
+                (lambda (icon)
+                  (let ((inhibit-message nil))
+                    (setq el-search--last-message
+                          (el-search--message-no-log
+                           "%s   %s"
+                           (let ((head (el-search-object-head el-search--current-search)))
+                             (or (el-search-head-file head)
+                                 (el-search-head-buffer head)))
+                           icon)))))))
+       (condition-case-unless-debug err
+           (el-search-display-match-count nil el-search-hl-post-command-fun--last-animator)
+         (error (el-search--message-no-log
+                 "Error counting matches: %s" (error-message-string err)))))
       ((pred el-search-keep-session-command-p))
       (_ (unless el-search-keep-hl (stop))))))
 
@@ -3648,6 +3648,56 @@ Prompt for a new pattern and revert."
     (set-keymap-parent map (make-composed-keymap special-mode-map emacs-lisp-mode-map))
     map))
 
+(defcustom el-search-occur-match-markers (list "--> " " <--")
+  "Whether to mark matches in copied or saved text in *El Occur*.
+
+When non-nil, should be a list of two strings (BEFORE-MARKER
+AFTER-MARKER).  When large parts of an *El Occur* buffer are
+copied or the buffer is saved to a file, all matches are silently
+surrounded with these markers.  This is useful if you want to
+send the buffer contents to someone else.  \"Large\" means that
+the copied text includes buffer or file headlines, so this will
+not get in your way if you only want to copy single expressions
+from an *El Occur* buffer.
+
+When nil, all such treatment is disabled."
+  :type '(choice
+          (const :tag "Off" nil)
+          (list  :tag "Match Text Markers"
+	         (string :tag "Before-Marker String")
+	         (string :tag "After-Marker String"))))
+
+(defun el-search-occur-filter-buffer-substring (beg end &optional delete)
+  (if (or delete
+          (not el-search-occur-match-markers)
+          (not (save-excursion
+                 (goto-char beg)
+                 (search-forward-regexp outline-regexp end t))))
+      (buffer-substring--filter beg end delete)
+    (let ((contents '())
+          p)
+      (save-excursion
+        (setq p (goto-char beg))
+        (while (not (<= end (point)))
+          (goto-char (next-single-char-property-change (point) el-search-occur-match-ov-prop nil end))
+          (push (buffer-substring p (point)) contents)
+          (push (if (get-char-property (point) el-search-occur-match-ov-prop)
+                    (car el-search-occur-match-markers)
+                  (if (<= end (point)) "" (cadr el-search-occur-match-markers)))
+                contents)
+          (setq p (point))))
+      (apply #'concat (nreverse contents)))))
+
+(defun el-search-occur-write-file (&optional file)
+  (let ((file (or file buffer-file-name))
+        (contents (save-restriction (widen) (filter-buffer-substring (point-min) (point-max)))))
+    (with-temp-buffer
+      (insert contents)
+      (write-region (point-min) (point-max) file nil t))
+    (set-buffer-modified-p nil)
+    t ;signal success
+    ))
+
 (define-derived-mode el-search-occur-mode emacs-lisp-mode "El-Occur"
   "Major mode for El-Occur buffers.
 
@@ -3663,7 +3713,9 @@ addition from `special-mode-map':
   (setq-local hs-hide-comments-when-hiding-all nil)
   (hs-minor-mode +1)
   (setq outline-regexp "^;;;\\ \\*+")
-  (outline-minor-mode +1))
+  (outline-minor-mode +1)
+  (add-hook 'write-contents-functions 'el-search-occur-write-file nil t)
+  (setq-local filter-buffer-substring-function #'el-search-occur-filter-buffer-substring))
 
 (put 'el-search-occur-mode 'mode-class 'special)
 
@@ -4363,13 +4415,8 @@ exactly you did?  Thanks!"))))
                               (edit-replacement
                                (lambda (&optional ediff-only)
                                  (save-excursion ;user may copy stuff from base buffer etc.
-                                   (let* ((buffer (generate-new-buffer "*Replacement*"))
-                                          (window (display-buffer buffer)))
-                                     (select-window window)
-                                     (emacs-lisp-mode)
-                                     (unless ediff-only
-                                       (insert
-                                        (propertize "\
+                                   (let* ((header
+                                           (propertize "\
 ;; This buffer shows the individual replacement for the current match.
 ;; You may edit it here while query-replace is interrupted by a
 ;; `recursive-edit'.
@@ -4377,9 +4424,21 @@ exactly you did?  Thanks!"))))
 ;; to confirm.
 ;; Type C-c C-e to Ediff the current match with this buffer's content.
 ;; Type C-c C-r to revert this buffer."
-                                                    'read-only t 'field t
-                                                    'front-sticky t 'rear-nonsticky t)
-                                        "\n\n"))
+                                                       'read-only t 'field t
+                                                       'front-sticky t 'rear-nonsticky t))
+                                          (find-replacement-beg
+                                           (lambda ()
+                                             (goto-char (point-min))
+                                             (when (looking-at (regexp-quote header))
+                                               (goto-char (match-end 0)))
+                                             (while (and (not (eobp)) (looking-at "^$"))
+                                               (forward-line))))
+                                          (buffer (generate-new-buffer "*Replacement*"))
+                                          (window (display-buffer buffer)))
+                                     (select-window window)
+                                     (emacs-lisp-mode)
+                                     (unless ediff-only
+                                       (insert header "\n\n"))
                                      (save-excursion (insert to-insert))
                                      (let ((inhibit-message t))
                                        (indent-region (point) (point-max)))
@@ -4417,10 +4476,7 @@ exactly you did?  Thanks!"))))
                                           (define-key map [(control ?c) (control ?r)]
                                             (lambda ()
                                               (interactive)
-                                              (goto-char (point-min))
-                                              (while (and (not (eobp))
-                                                          (looking-at "^;;\\|^$"))
-                                                (forward-line))
+                                              (funcall find-replacement-beg)
                                               (delete-region (point) (point-max))
                                               (insert (funcall get-replacement-string))))
                                           map))
@@ -4435,11 +4491,9 @@ exactly you did?  Thanks!"))))
                                      (let ((new-to-insert
                                             (and (buffer-modified-p buffer)
                                                  (with-current-buffer buffer
-                                                   (goto-char (point-min))
-                                                   (while (and (not (eobp))
-                                                               (looking-at "^;;\\|^$"))
-                                                     (forward-line))
-                                                   (buffer-substring (point) (point-max))))))
+                                                   (funcall find-replacement-beg)
+                                                   (string-trim
+                                                    (buffer-substring (point) (point-max)))))))
                                        (when (and new-to-insert
                                                   (y-or-n-p "Use modified version?"))
                                          (setq to-insert new-to-insert)))
@@ -4874,7 +4928,8 @@ Reuse already given input."
            (call-interactively #'el-search-directory)))]
      ["Search 'load-path'"         el-search-load-path]
      ["Search Emacs Elisp Sources" el-search-emacs-elisp-sources]
-     ["Search Elisp Buffers"       el-search-buffers]))
+     ["Search Elisp Buffers"       el-search-buffers]
+     ["List Patterns"              el-search-list-defined-patterns]))
 
   (easy-menu-add-item
    (lookup-key emacs-lisp-mode-map [menu-bar]) '("Emacs-Lisp")
