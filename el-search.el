@@ -7,7 +7,7 @@
 ;; Created: 29 Jul 2015
 ;; Keywords: lisp
 ;; Compatibility: GNU Emacs 25
-;; Version: 1.11.4
+;; Version: 1.12.4
 ;; Package-Requires: ((emacs "25") (stream "2.2.4") (cl-print "1.0"))
 
 
@@ -164,8 +164,8 @@
 ;;
 ;;
 ;; The setup you need for your init file is trivial: you only need to
-;; install the key bindings you want to use.  All important commands
-;; are autoloaded.
+;; install key bindings if you want some (see above).  All important
+;; commands are autoloaded.
 ;;
 ;;
 ;; Usage
@@ -321,9 +321,9 @@
 ;;
 ;; It is possible to replace a match with an arbitrary number of
 ;; expressions using "splicing mode".  When it is active, the
-;; replacement expression must evaluate to a list, and is spliced into
-;; the buffer for any match.  Hit s from the prompt to toggle splicing
-;; mode in an `el-search-query-replace' session.
+;; replacement expression must evaluate to a list, and this list is
+;; spliced into the buffer for any match.  Hit s from the prompt to
+;; toggle splicing mode in an `el-search-query-replace' session.
 ;;
 ;; Much like `el-search' sessions, `el-search-query-replace' sessions
 ;; are also internally represented as objects with state, and are also
@@ -333,7 +333,7 @@
 ;; There are two ways to edit replacements directly while performing
 ;; an el-search-query-replace:
 ;;
-;; (1) Without suspending the search: hit o at the prompt to show the
+;; (1) Without suspending the search: hit e at the prompt to show the
 ;; replacement of the current match in a separate buffer.  You can
 ;; edit the replacement in this buffer.  Confirming with C-c C-c will
 ;; make el-search replace the current match with this buffer's
@@ -659,11 +659,10 @@ whole match visible whenever possible."
 (defvar el-search-read-expression-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map read-expression-map)
-    (define-key map [(control ?g)] #'abort-recursive-edit)
+    (define-key map "\C-g" #'abort-recursive-edit)
     (define-key map [up]   nil)
     (define-key map [down] nil)
-    (define-key map [(control ?j)] #'newline)
-    (define-key map [(meta return)] #'el-search-set-occur-flag-exit-minibuffer)
+    (define-key map "\C-j" #'newline)
     (define-key map (kbd "M-RET")   #'el-search-set-occur-flag-exit-minibuffer)
     map)
   "Keymap for reading input with `el-search-read-expression'.")
@@ -924,15 +923,14 @@ nil."
   ;; Push string INPUT to HISTVAR unless empty or equal to the head
   ;; element modulo `read'.  Reindent INPUT when multiline.
   (let ((hist-head (car (symbol-value histvar))))
-    (unless (or (string-match-p "\\`\\'" input)
+    (unless (or (string-match-p (rx bos eos) input)
                 (and (stringp hist-head)
                      (or (string= input hist-head)
                          (ignore-errors (equal (el-search-read input) (el-search-read hist-head))))))
-      (push (if (string-match-p "\\`.+\n" input)
+      (push (if (string-match-p (rx bos (+ nonl) "\n") input)
                 (with-temp-buffer
                   (emacs-lisp-mode)
-                  (unless (string-match-p "\\`\n" input)
-                    (insert "\n"))
+                  (insert "\n")
                   (insert input)
                   (indent-region 1 (point))
                   (buffer-string))
@@ -1179,7 +1177,7 @@ error."
 
            ;; FIXME: can the rest be done more generically?
            ((and (looking-at (rx (or (syntax symbol) (syntax word))))
-                 (not (looking-at "\\_<"))
+                 (not (looking-at (rx symbol-start)))
                  (not (funcall looking-at-from-back ",@" 2)))
             (forward-symbol 1))
            ((or (and (looking-at "'") (funcall looking-at-from-back "#" 1))
@@ -1227,7 +1225,8 @@ In addition to the standard `pcase' patterns the following
 pattern types are defined:")
       (mapc
        (pcase-lambda (`(,symbol . ,fun))
-         (unless (string-match-p "\\`[-_]\\|--" (symbol-name symbol)) ;Let's consider these "internal"
+         (unless (string-match-p (rx (or (seq bos (any "-" "_")) "--")) ;Let's consider these "internal"
+                                 (symbol-name symbol))
            (when-let ((doc (documentation fun)))
              (insert "\n\n\n-- ")
              (setq doc (help-fns--signature symbol doc fun fun nil))
@@ -1883,7 +1882,7 @@ Unlike `count-matches' matches \"inside\" other matches also count."
                (end-of-buffer nil))
              (or (= here (point))
                  (and allow-leading-whitespace
-                      (string-match-p "\\`[[:space:]]*\\'" (buffer-substring here (point)))))
+                      (string-match-p (rx bos (+ space) eos) (buffer-substring here (point)))))
              (el-search--match-p matcher current-sexp))))))
 
 ;;;###autoload
@@ -2063,13 +2062,13 @@ Go back to the place where the search had been started."
 
 (defvar el-search-basic-transient-map
   (let ((map (make-sparse-keymap)))
-    (define-key map [return]       #'el-search-pause-search)
     (define-key map (kbd "RET")    #'el-search-pause-search)
-    (define-key map [(control ?g)] #'el-search-keyboard-quit)
+    (define-key map "\C-g"         #'el-search-keyboard-quit)
     (define-key map [??]           #'el-search-help-list-bindings)
     (define-key map `[,help-char]  el-search-help-map)
     (define-key map [help]         el-search-help-map)
     (define-key map [f1]           el-search-help-map)
+    ;; (define-key map [remap point-to-register] #'el-search-to-register)
     map))
 
 (defvar el-search-prefix-key-transient-map
@@ -2183,7 +2182,7 @@ that contain a file named \".nosearch\" are excluded as well."
                             el-search-ignored-directory-regexps)
                    (and
                     el-search-respect-nosearch
-                    (directory-files dir-name nil "\\`\\.nosearch\\'" t))))))
+                    (directory-files dir-name nil (rx bos ".nosearch" eos) t))))))
    t #'el-search--elisp-file-p))
 
 
@@ -2243,7 +2242,7 @@ map until you finished el-searching."
                               "`" (symbol-name cmd-name) "'"
                               " (" (keys-string cmd-name) ")\n"
                               (when-let ((docstring (documentation cmd-name)))
-                                (string-match "\\(\\`.*$\\)" docstring)
+                                (string-match (rx (group bos (0+ nonl) eol)) docstring)
                                 (concat (match-string 1 docstring) "\n"))
                               "\n")
                            (concat "  "
@@ -2633,9 +2632,9 @@ absolute name must be matched by all of them."
   "Non-nil indicates we should not remove any highlighting.")
 
 (defun el-search--scroll-sexp-in-view (bounds)
-  ;; Try to make the sexp bounded by BOUNDS better visible.
-  ;; This tries to scroll (cdr BOUNDS) into view when necessary, and to
-  ;; center the sexp.
+  ;; Try to make the sexp bounded by BOUNDS (which is a list (BEG END))
+  ;; better visible.  This tries to scroll (cadr BOUNDS) into view when
+  ;; necessary, and to center the sexp.
   (when el-search-fancy-scrolling
     (let ((wheight (window-height)))
       ;; FIXME: make the following integer constants customizable,
@@ -3151,7 +3150,7 @@ continued."
      (or (bufferp buffer-or-file-name)
          ;; `file-in-directory-p' would be perfect here, but it calls
          ;; file-truename on both args what we don't want, so we use this:
-         (string-match-p "\\`\\.\\." (file-relative-name buffer-or-file-name directory)))))
+         (string-match-p (rx bos "..") (file-relative-name buffer-or-file-name directory)))))
   (el-search-prefix-key-maybe-set-transient-map))
 
 (defun el-search-pattern--interactive (&optional prompt display-match-count)
@@ -3401,9 +3400,9 @@ See the command `el-search-pattern' for more information."
       (el-search--set-wrap-flag 'backward))))
 
 (define-obsolete-function-alias 'el-search-previous-match
-  'el-search-pattern-backward "since el-search-1.3")
+  'el-search-pattern-backward "el-search 1.3")
 (define-obsolete-function-alias 'el-search-pattern-backwards
-  'el-search-pattern-backward "since el-search-1.6.7")
+  'el-search-pattern-backward "el-search 1.6.7")
 
 
 
@@ -3645,12 +3644,9 @@ Prompt for a new pattern and revert."
 
 (defvar el-search-occur-mode-map-1
   (let ((map (make-sparse-keymap)))
-    (define-key map [tab]           #'el-search-occur-tab-command)
     (define-key map "\t"            #'el-search-occur-tab-command)
-    (define-key map [return]        #'el-search-occur-jump-to-match)
     (define-key map "\r"            #'el-search-occur-jump-to-match)
-    (define-key map [S-iso-lefttab] #'el-search-occur-cycle)
-    (define-key map [(shift tab)]   #'el-search-occur-cycle)
+    (define-key map [backtab]       #'el-search-occur-cycle)
     (define-key map [?p]            #'el-search-occur-previous-match)
     (define-key map [?n]            #'el-search-occur-next-match)
     (define-key map [?r]            #'el-search-occur-previous-match)
@@ -3731,7 +3727,7 @@ addition from `special-mode-map':
   (setq buffer-read-only t)
   (setq-local hs-hide-comments-when-hiding-all nil)
   (hs-minor-mode +1)
-  (setq outline-regexp "^;;;\\ \\*+")
+  (setq outline-regexp (rx bol ";;; " (+ "*")))
   (outline-minor-mode +1)
   (add-hook 'write-contents-functions 'el-search-occur-write-file nil t)
   (setq-local filter-buffer-substring-function #'el-search-occur-filter-buffer-substring))
@@ -4145,8 +4141,7 @@ clone with an individual state."
             (concat
              (let ((printed-pattern (el-search--pp-to-string (el-search-object-pattern qr-search))))
                (format (if (string-match-p "\n" printed-pattern) ":\n%s" " %s")
-                       (if dont-propertize printed-pattern
-                         (propertize printed-pattern 'face 'shadow))))
+                       printed-pattern))
              " -> "
              (el-search--pp-to-string (el-search-query-replace-object-to-expr qr-object)))))
        (if dont-propertize printed-rule
@@ -4175,7 +4170,7 @@ In an interactive call or when EL-SEARCH-QUERY-REPLACE-OBJECT is
 nil, the last active `el-search-query-replace' session object is
 used."
   (interactive (list (if el-search--current-query-replace
-                         (register-read-with-preview "Save current search to register: ")
+                         (register-read-with-preview "Save current query-replace to register: ")
                        (user-error "No el-search-query-replace has been started yet"))))
   (set-register register (or el-search-query-replace-object el-search--current-query-replace)))
 
@@ -4201,8 +4196,10 @@ text."
                             (goto-char (car region))
                             (apply #'delete-region region)))
            ;; care about other sexps in this line
-           (sexp-before-us (not (looking-back "\(\\|^\\s-*" (line-beginning-position))))
-           (sexp-after-us  (not (looking-at "\\s-*[;\)]\\|$")))
+           (sexp-before-us (not (looking-back
+                                 (rx (or "(" (seq bol (zero-or-more (syntax whitespace)))))
+                                 (line-beginning-position))))
+           (sexp-after-us  (not (looking-at (rx (or (seq (* (syntax whitespace)) (any ";)")) eol)))))
            (insert-newline-before
             (or
              (and (string-match-p "\n" to-insert)
@@ -4221,7 +4218,7 @@ text."
              ))
            (insert-newline-after (and insert-newline-before sexp-after-us)))
       (when insert-newline-before
-        (when (looking-back "\\s-+" (line-beginning-position))
+        (when (looking-back (rx (+ (syntax whitespace))) (line-beginning-position) 'greedy)
           (delete-region (match-beginning 0) (match-end 0)))
         (insert "\n"))
       (insert to-insert)
@@ -4358,7 +4355,7 @@ exactly you did?  Thanks!"))))
             (with-current-buffer buffer-b
               (save-excursion
                 (goto-char (point-min))
-                (while (looking-at "^;;\\|^$")
+                (while (looking-at (rx (or (seq bol ";;") (seq bol eol))))
                   (forward-line))
                 (list (current-buffer) (point) (point-max))))
             (list (apply #'list
@@ -4399,7 +4396,7 @@ exactly you did?  Thanks!"))))
     (pattern replacement &optional splice to-input-string use-current-search)
   (if-let ((qr-object (and (el-search-query-replace-object-p pattern) pattern)))
       (setq
-       el-search--current-query-replace pattern
+       el-search--current-query-replace qr-object
        pattern                   (el-search-query-replace-object-from-pattern  qr-object)
        replacement               (el-search-query-replace-object-to-expr       qr-object)
        splice                    (el-search-query-replace-object-splice        qr-object)
@@ -4572,7 +4569,9 @@ exactly you did?  Thanks!"))))
                                             (funcall make-cleanup-fun #'exit-recursive-edit))
                                           (define-key map [(control ?c) (control ?q)]
                                             abort)
-                                          (define-key map [(control ?c) (control ?a)] ;"Abort"
+                                          (define-key map [(control ?c) (control ?k)]
+                                            abort)
+                                          (define-key map [(control ?c) (control ?a)]
                                             abort)
                                           (define-key map [(control ?c) (control ?e)]
                                             (lambda ()
@@ -4607,6 +4606,7 @@ exactly you did?  Thanks!"))))
                                      (kill-buffer buffer))
                                    (el-search--after-scroll (selected-window) (window-start))
                                    nil)))
+                              (use-dialog-box nil)
                               (query
                                (lambda ()
                                  (if stopped-for-comments
@@ -4620,7 +4620,7 @@ exactly you did?  Thanks!"))))
                                        (format "[%d/%d] %s"
                                                (if replaced-this nbr-done (1+ nbr-done))
                                                (+ nbr-done nbr-to-do)
-                                               (if replaced-this "*" "-")))
+                                               (if replaced-this (propertize "*" 'face 'success) "-")))
                                      (delq nil
                                            (list
                                             `(?y "y"
@@ -4631,24 +4631,24 @@ exactly you did?  Thanks!"))))
                                                  '(?n "n" "Move to the next match"))
                                             '(?r "r" "\
 Replace match but don't move or restore match if already replaced")
-                                            '(?! "all" "Replace all remaining matches in this buffer")
+                                            '(?! "!" "Replace all remaining matches in this buffer")
                                             '(?b "skip buf"
                                                  "Skip this buffer and any remaining matches in it")
                                             (and buffer-file-name
-                                                 '(?d "skip dir"
+                                                 '(?d "dir"
                                                       "Skip a parent directory of current file"))
                                             (and (not replaced-this)
-                                                 (list ?s (concat (if splice "disable" "enable")
-                                                                  " splice")
+                                                 (list ?s (concat (if splice "no " "")
+                                                                  "splice")
                                                        (substitute-command-keys "\
 Toggle splicing mode (\\[describe-function] el-search-query-replace for details)")))
-                                            '(?o "show" "\
+                                            '(?e "edit" "\
 Show current replacement in a separate buffer - you can modify it there")
-                                            '(?e "ediff" "\
+                                            '(?E "Ediff" "\
 Ediff match with replacement")
                                             '(?q  "quit")
                                             '(?\r "quit")
-                                            '(?S "Search" "\
+                                            '(?S "S" "\
 Switch to driving search.  Useful to reposition search head.")))))))))
                          (when (and
                                 stop-for-comments
@@ -4755,9 +4755,9 @@ Replace all matches in all buffers"))))
                                                        el-search--current-query-replace)
                                                       splice)
                                                 nil)
-                                               (?o (funcall edit-and-update)
+                                               (?e (funcall edit-and-update)
                                                    nil)
-                                               (?e (funcall edit-and-update 'ediff-only)
+                                               (?E (funcall edit-and-update 'ediff-only)
                                                    nil)
                                                ((or ?q ?\C-g ?\r) (signal 'quit t))
                                                (?S
@@ -4793,22 +4793,22 @@ Replace all matches in all buffers"))))
                                             (propertize
                                              "Skip the matches in the replacement? "
                                              'face 'el-search-highlight-in-prompt-face)
-                                            '((?y "yes"
+                                            '((?s "skip"
                                                   "Skip any matches in this replacement")
-                                              (?n "no"
+                                              (?d "don't"
                                                   "Continue with the matches in the replacement")
-                                              (?Y "always Yes"
+                                              (?S "always Skip"
                                                   "Skip now and for the rest of this session")
-                                              (?N "always No"
+                                              (?D "always Don't"
                                                   "Don't skip now and for the rest of this session")
                                               (?q "quit"
                                                   "Abort this query-replace session"))))
-                                 ((and (or ?y ?Y) answer)
-                                  (when (= answer ?Y) (setq skip-matches-in-replacement t))
+                                 ((and (or ?s ?S) answer)
+                                  (when (= answer ?S) (setq skip-matches-in-replacement t))
                                   (funcall skip-replacement))
                                  (?q (signal 'quit t))
                                  (answer
-                                  (when (= answer ?N) (setq skip-matches-in-replacement nil))
+                                  (when (= answer ?D) (setq skip-matches-in-replacement nil))
                                   (when replace-all
                                     (setq replace-all nil)
                                     ;; FIXME: can this be annoying?  Problem: we need to catch possibly
@@ -4908,7 +4908,7 @@ Don't save this buffer and all following buffers; don't ask again"))))
           (forward-sexp)
           (skip-chars-forward " \t\n")
           ;; FIXME: maybe more sanity tests here...
-          (if (not (looking-at "->\\|=>\\|>"))
+          (if (not (looking-at (rx (or "->" "=>" ">"))))
               (setq from from-input
                     to (let ((el-search--initial-mb-contents nil))
                          (el-search--read-pattern "Replace with result of evaluation of: " from)))
@@ -4927,10 +4927,10 @@ Don't save this buffer and all following buffers; don't ask again"))))
                                 (newline-in-to   (string-match-p "\n" to)))
                             (format "%s%s%s ->%s%s"
                                     (if (and (or newline-in-from newline-in-to)
-                                             (not (string-match-p "\\`\n" from))) "\n" "")
-                                    (if     newline-in-from                       "\n" "" ) from
+                                             (not (string-match-p (rx bos "\n") from))) "\n" "")
+                                    (if     newline-in-from                             "\n" "" ) from
                                     (if (and (or newline-in-from newline-in-to)
-                                             (not (string-match-p "\\`\n" to)))   "\n" " ") to)))
+                                             (not (string-match-p (rx bos "\n") to)))   "\n" " ") to)))
                   (indent-region 1 (point-max))
                   (buffer-string))
                 el-search-query-replace-history))
@@ -5057,7 +5057,7 @@ Reuse already given input."
     (call-interactively #'el-search-pattern-backward)))
 
 (define-obsolete-function-alias 'el-search-search-backwards-from-isearch
-  'el-search-search-backward-from-isearch "since el-search-1.6.7")
+  'el-search-search-backward-from-isearch "el-search 1.6.7")
 
 ;;;###autoload
 (defun el-search-replace-from-isearch ()
